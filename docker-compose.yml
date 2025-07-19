@@ -1,0 +1,7 @@
+services:
+  cadence-pacer:
+    build: .
+    image: ghcr.io/watsona4/cadence-pacer:latest
+    ports:
+      - "8223:80"  # You can change 8080 to whatever external port you want
+    restart: unless-stopped
