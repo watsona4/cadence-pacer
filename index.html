@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Cadence">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="apple-touch-icon" href="/cadence/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/cadence/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/cadence/favicon-16x16.png">
+    <link rel="icon" type="image/x-icon" href="/cadence/favicon.ico">
+    <link rel="manifest" href="/cadence/manifest.json">
+    <title>Bike Cadence Pacer</title>
+
+    <!-- Bootstrap 5 + Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.css" rel="stylesheet" />
+    <style>
+      input[type=range].form-range {
+          height: 2.25rem;
+          background-color: transparent;
+          appearance: none;
+          -webkit-appearance: none;
+      }
+
+      input[type=range].form-range::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          background-color: #0d6efd;
+          width: 1rem;
+          height: 1rem;
+          border-radius: 50%;
+          cursor: pointer;
+      }
+
+      input[type=range].form-range::-webkit-slider-runnable-track {
+          background: #dee2e6;
+          height: 0.25rem;
+          border-radius: 0.25rem;
+      }
+
+      input[type=range].form-range:focus {
+          outline: none;
+      }
+
+      input[type=range]::-moz-range-thumb {
+          background: #0d6efd;
+          border: none;
+          width: 1rem;
+          height: 1rem;
+          border-radius: 50%;
+          cursor: pointer;
+      }
+
+      input[type=range]::-moz-range-track {
+          background: #dee2e6;
+          height: 0.25rem;
+          border-radius: 0.25rem;
+      }
+      .btn {
+          font-size: 2rem;
+          padding: 1rem 1.5rem;
+      }
+      .btn i {
+          font-size: 1.8rem;
+      }
+      .dark-mode {
+          background-color: #121212 !important;
+          color: #eee !important;
+      }
+      .dark-mode .btn {
+          background-color: #333 !important;
+          color: #fff !important;
+          border-color: #444 !important;
+      }
+      .dark-mode .form-check-label {
+          color: #ccc !important;
+      }
+      .dark-mode input[type=range]::-webkit-slider-thumb,
+      .dark-mode input[type=range]::-moz-range-thumb {
+          background-color: #bbb;
+      }
+    </style>
+  </head>
+  <body class="bg-light text-center py-3">
+    <div class="form-check form-switch text-end mx-3">
+      <input class="form-check-input" type="checkbox" id="darkToggle">
+      <label class="form-check-label" for="darkToggle">Dark Mode</label>
+    </div>
+
+    <div class="container">
+      <h1 class="mb-4">Bike Cadence Pacer</h1>
+      <h2 class="display-3 my-3" id="currentRPMDisplay">85 RPM</h2>
+
+      <div class="mb-4">
+        <button id="startButton" onclick="togglePacer()" class="btn btn-primary w-100 mb-2 fs-2">
+          <i class="bi bi-play-fill me-2"></i>Start
+        </button>
+        <button id="setRPMButton" onclick="setRPM()" class="btn btn-secondary w-100 mb-2 fs-2" disabled>
+          <i class="bi bi-sliders me-2"></i>Set RPM
+        </button>
+        <button id="standUpButton" onclick="standUp()" class="btn btn-warning w-100 mb-2 fs-2" disabled>
+          <i class="bi bi-person-standing me-2"></i>Stand Up
+        </button>
+        <button id="cooldownButton" onclick="startCooldown()" class="btn btn-info w-100 mb-2 fs-2" disabled>
+          <i class="bi bi-snow me-2"></i>Cooldown
+        </button>
+      </div>
+
+      <div class="mb-4">
+        <label for="rpmSlider" class="form-label fs-3">Target RPM: <span id="rpmVal">90</span></label>
+        <input type="range" class="form-range" id="rpmSlider" min="50" max="120" step="5" value="90" />
+      </div>
+
+      <div class="mb-4">
+        <label for="cooldownSlider" class="form-label fs-3">Cooldown Duration (minutes): <span id="cooldownVal">5</span></label>
+        <input type="range" class="form-range" id="cooldownSlider" min="1" max="5" step="1" value="5" />
+        <div id="countdown" class="mt-3 fs-1 fw-semibold"></div>
+      </div>
+    </div>
+
+    <script>
+      const tickURL = './tick.wav';
+      const tockURL = './tock.wav';
+      const chimeURL = './chime.wav';
+      const currentRPMDisplay = document.getElementById('currentRPMDisplay');
+      const rpmSlider = document.getElementById('rpmSlider');
+      const rpmVal = document.getElementById('rpmVal');
+      const cooldownSlider = document.getElementById('cooldownSlider');
+      const cooldownVal = document.getElementById('cooldownVal');
+      const countdownDisplay = document.getElementById('countdown');
+
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      let tickBuffer, tockBuffer, chimeBuffer;
+      let cadenceBeat = 0;
+      let cadenceLoopActive = false;
+      let intervalId;
+      let countdownInterval;
+      let cooldownTimer;
+      let currentRPM = 85;
+      let silentSource;
+
+      rpmSlider.oninput = () => rpmVal.textContent = rpmSlider.value;
+      cooldownSlider.oninput = () => cooldownVal.textContent = cooldownSlider.value;
+
+      async function loadSound(url) {
+          const response = await fetch(url);
+          const arrayBuffer = await response.arrayBuffer();
+          return await audioContext.decodeAudioData(arrayBuffer);
+      }
+
+      async function init() {
+          tickBuffer = await loadSound(tickURL);
+          tockBuffer = await loadSound(tockURL);
+          chimeBuffer = await loadSound(chimeURL);
+      }
+
+      function playBuffer(buffer) {
+          const source = audioContext.createBufferSource();
+          source.buffer = buffer;
+          source.connect(audioContext.destination);
+          source.start();
+      }
+
+      function togglePacer() {
+          const button = document.getElementById("startButton");
+          const icon = button.querySelector("i");
+          const others = [
+              document.getElementById("setRPMButton"),
+              document.getElementById("standUpButton"),
+              document.getElementById("cooldownButton"),
+              document.getElementById("rpmSlider"),
+              document.getElementById("cooldownSlider")
+          ];
+
+          if (!cadenceLoopActive) {
+              cadenceLoopActive = true;
+              startSilentLoop();
+              button.innerHTML = '<i class="bi bi-stop-fill me-2"></i>Stop';
+              others.forEach(b => b.disabled = false);
+              setTargetRPM(85, 0);
+              cadenceLoop();
+          } else {
+              cadenceLoopActive = false;
+              if (silentSource) silentSource.stop();
+              countdownDisplay.textContent = '';
+              if (countdownInterval) clearInterval(countdownInterval);
+              if (cooldownTimer) clearInterval(cooldownTimer);
+              if (intervalId) clearInterval(intervalId);
+              button.innerHTML = '<i class="bi bi-play-fill me-2"></i>Start';
+              others.forEach(b => b.disabled = true);
+          }
+      }
+
+      function setRPM() {
+          setTargetRPM(parseInt(rpmSlider.value), 5);
+      }
+
+      function standUp() {
+          const temp = currentRPM;
+          setTargetRPM(60, 2, () => {
+              setTimeout(() => setTargetRPM(temp, 2), 10000);
+          });
+      }
+
+      function startCooldown() {
+          const durationMinutes = parseInt(cooldownSlider.value);
+          const totalSeconds = durationMinutes * 60 - 5;
+          const rampDownSeconds = Math.floor(totalSeconds * 0.9);
+          let secondsLeft = totalSeconds + 5;
+
+          if (countdownInterval) clearInterval(countdownInterval);
+          updateCountdown(secondsLeft);
+          countdownInterval = setInterval(() => {
+              updateCountdown(--secondsLeft);
+              if (secondsLeft <= 0) clearInterval(countdownInterval);
+          }, 1000);
+
+          setTargetRPM(80, 5, () => {
+              let count = 0;
+              clearInterval(cooldownTimer);
+              cooldownTimer = setInterval(() => {
+                  count++;
+                  if (count <= rampDownSeconds) {
+                      const newRPM = 80 - (10 * count / rampDownSeconds);
+                      updateRPM(newRPM);
+                  } else {
+                      updateRPM(70);
+                  }
+                  if (count >= totalSeconds) {
+                      clearInterval(cooldownTimer);
+                      cadenceLoopActive = false;
+                      playBuffer(chimeBuffer);
+                      document.getElementById("startButton").innerHTML = '<i class="bi bi-play-fill me-2"></i>Start';
+                      document.getElementById("setRPMButton").disabled = true;
+                      document.getElementById("standUpButton").disabled = true;
+                      document.getElementById("cooldownButton").disabled = true;
+                  }
+              }, 1000);
+          });
+      }
+
+      function updateCountdown(secondsLeft) {
+          const min = Math.floor(secondsLeft / 60);
+          const sec = secondsLeft % 60;
+          countdownDisplay.textContent = `Cooldown Time Left: ${min}:${sec.toString().padStart(2, '0')}`;
+      }
+
+      function setTargetRPM(target, durationSeconds, callback) {
+          if (intervalId) clearInterval(intervalId);
+          const steps = durationSeconds * 20;
+          let count = 0;
+          const start = currentRPM;
+          intervalId = setInterval(() => {
+              count++;
+              currentRPM = start + (target - start) * (count / steps);
+              updateRPM(currentRPM);
+              if (count >= steps) {
+                  currentRPM = target;
+                  updateRPM(currentRPM);
+                  clearInterval(intervalId);
+                  if (callback) callback();
+              }
+          }, 50);
+      }
+
+      function updateRPM(rpm) {
+          currentRPM = Math.round(rpm);
+          currentRPMDisplay.textContent = `${currentRPM} RPM`;
+      }
+
+      function startSilentLoop() {
+          const silentBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 2, audioContext.sampleRate);
+          silentSource = audioContext.createBufferSource();
+          silentSource.buffer = silentBuffer;
+          silentSource.loop = true;
+          silentSource.connect(audioContext.destination);
+          silentSource.start();
+      }
+
+      async function cadenceLoop() {
+          while (cadenceLoopActive) {
+              playBuffer(cadenceBeat === 0 ? tickBuffer : tockBuffer);
+              cadenceBeat = (cadenceBeat + 1) % 4;
+              const delay = 60000 / (currentRPM * 2);
+              await new Promise(resolve => setTimeout(resolve, delay));
+          }
+      }
+
+      init();
+
+      window.addEventListener('DOMContentLoaded', () => {
+          document.getElementById("setRPMButton").disabled = true;
+          document.getElementById("standUpButton").disabled = true;
+          document.getElementById("cooldownButton").disabled = true;
+          document.getElementById("rpmSlider").disabled = true;
+          document.getElementById("cooldownSlider").disabled = true;
+      });
+
+      const darkToggle = document.getElementById('darkToggle');
+      const bodyEl = document.body;
+      darkToggle.addEventListener('change', () => {
+          const enable = darkToggle.checked;
+          bodyEl.classList.toggle('dark-mode', enable);
+          localStorage.setItem('darkMode', enable);
+      });
+
+      // On load, restore dark mode preference
+      if (localStorage.getItem('darkMode') === 'true') {
+          darkToggle.checked = true;
+          bodyEl.classList.add('dark-mode');
+      }
+
+      navigator.serviceWorker.register('/cadence/service-worker.js');
+      </script>
+  </body>
+</html>
