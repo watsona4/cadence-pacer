@@ -68,30 +68,9 @@
       .btn i {
           font-size: 1.8rem;
       }
-      .dark-mode {
-          background-color: #121212 !important;
-          color: #eee !important;
-      }
-      .dark-mode .btn {
-          background-color: #333 !important;
-          color: #fff !important;
-          border-color: #444 !important;
-      }
-      .dark-mode .form-check-label {
-          color: #ccc !important;
-      }
-      .dark-mode input[type=range]::-webkit-slider-thumb,
-      .dark-mode input[type=range]::-moz-range-thumb {
-          background-color: #bbb;
-      }
     </style>
   </head>
   <body class="bg-light text-center py-3">
-    <div class="form-check form-switch text-end mx-3">
-      <input class="form-check-input" type="checkbox" id="darkToggle">
-      <label class="form-check-label" for="darkToggle">Dark Mode</label>
-    </div>
-
     <div class="container">
       <h1 class="mb-4">Bike Cadence Pacer</h1>
       <h2 class="display-3 my-3" id="currentRPMDisplay">85 RPM</h2>
@@ -300,20 +279,6 @@
           document.getElementById("rpmSlider").disabled = true;
           document.getElementById("cooldownSlider").disabled = true;
       });
-
-      const darkToggle = document.getElementById('darkToggle');
-      const bodyEl = document.body;
-      darkToggle.addEventListener('change', () => {
-          const enable = darkToggle.checked;
-          bodyEl.classList.toggle('dark-mode', enable);
-          localStorage.setItem('darkMode', enable);
-      });
-
-      // On load, restore dark mode preference
-      if (localStorage.getItem('darkMode') === 'true') {
-          darkToggle.checked = true;
-          bodyEl.classList.add('dark-mode');
-      }
 
       navigator.serviceWorker.register('/cadence/service-worker.js');
       </script>
