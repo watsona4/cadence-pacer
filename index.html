@@ -273,6 +273,19 @@
       init();
 
       window.addEventListener('DOMContentLoaded', () => {
+
+          document.querySelectorAll('.btn').forEach(btn => {
+              btn.addEventListener('click', () => {
+                  btn.classList.add('active');
+                  navigator.vibrate?.(50);
+                  btn.disabled = true;
+                  setTimeout(() => {
+                      btn.disabled = false;
+                      btn.classList.remove('active');
+                  }, 500);
+              });
+          });
+
           document.getElementById("setRPMButton").disabled = true;
           document.getElementById("standUpButton").disabled = true;
           document.getElementById("cooldownButton").disabled = true;
