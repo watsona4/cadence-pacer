@@ -114,6 +114,30 @@
       const countdownDisplay = document.getElementById('countdown');
 
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+      let wakeLock = null;
+
+      async function requestWakeLock() {
+          try {
+              if ('wakeLock' in navigator) {
+                  wakeLock = await navigator.wakeLock.request('screen');
+                  console.log('Wake lock is active');
+                  wakeLock.addEventListener('release', () => {
+                      console.log('Wake lock released');
+                  });
+              }
+          } catch (err) {
+              console.error(`Wake lock request failed: ${err.name}, ${err.message}`);
+          }
+      }
+
+      function releaseWakeLock() {
+          if (wakeLock) {
+              wakeLock.release();
+              wakeLock = null;
+          }
+      }
+
       let tickBuffer, tockBuffer, chimeBuffer;
       let cadenceBeat = 0;
       let cadenceLoopActive = false;
@@ -122,6 +146,8 @@
       let cooldownTimer;
       let currentRPM = 85;
       let silentSource;
+
+      releaseWakeLock();
 
       rpmSlider.oninput = () => rpmVal.textContent = rpmSlider.value;
       cooldownSlider.oninput = () => cooldownVal.textContent = cooldownSlider.value;
@@ -157,6 +183,7 @@
           ];
 
           if (!cadenceLoopActive) {
+              requestWakeLock();
               cadenceLoopActive = true;
               startSilentLoop();
               button.innerHTML = '<i class="bi bi-stop-fill me-2"></i>Stop';
@@ -165,6 +192,7 @@
               cadenceLoop();
           } else {
               cadenceLoopActive = false;
+              releaseWakeLock();
               if (silentSource) silentSource.stop();
               countdownDisplay.textContent = '';
               if (countdownInterval) clearInterval(countdownInterval);
@@ -213,7 +241,9 @@
                   if (count >= totalSeconds) {
                       clearInterval(cooldownTimer);
                       cadenceLoopActive = false;
+                      releaseWakeLock();
                       playBuffer(chimeBuffer);
+                      releaseWakeLock();
                       document.getElementById("startButton").innerHTML = '<i class="bi bi-play-fill me-2"></i>Start';
                       document.getElementById("setRPMButton").disabled = true;
                       document.getElementById("standUpButton").disabled = true;
