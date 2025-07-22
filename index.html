@@ -209,8 +209,8 @@
 
       function standUp() {
           const temp = currentRPM;
-          setTargetRPM(60, 2, () => {
-              setTimeout(() => setTargetRPM(temp, 2), 10000);
+          setTargetRPM(60, 5, () => {
+              setTimeout(() => setTargetRPM(temp, 5), 10000);
           });
       }
 
