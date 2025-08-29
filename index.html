@@ -147,9 +147,38 @@
       let currentRPM = 85;
       let silentSource;
 
+      // --- Set RPM flip-flop state ---
+      let slotA = null;          // first chosen target
+      let slotB = null;          // second chosen target
+      let sliderSlot = 'A';      // which slot the slider currently represents (A or B)
+
+      // --- Cooldown state for resume after Stand Up ---
+      let cooldownActive = false;
+      let cooldownStartMs = 0;
+      let cooldownDurationMs = 0;
+      let cooldownStartRPM = 85; // captured at cooldown start
+
       releaseWakeLock();
 
-      rpmSlider.oninput = () => rpmVal.textContent = rpmSlider.value;
+      rpmSlider.oninput = () => {
+          const v = Number(rpmSlider.value);
+          rpmVal.textContent = v;
+          if (slotA !== null && slotB !== null) {
+              // Only after both A and B exist does the slider edit the active slot
+              if (sliderSlot === 'A') {
+                  slotA = v;
+                  console.log(`[slider] editing A -> ${v}`);
+              } else {
+                  slotB = v;
+                  console.log(`[slider] editing B -> ${v}`);
+              }
+              console.log(`[state] after slider: A=${slotA} B=${slotB} sliderSlot=${sliderSlot} currentRPM=${currentRPM}`);
+          } else {
+              // Before B exists, slider is just a candidate value; don't mutate A here
+              console.log(`[slider] candidate value → ${v} (A=${slotA}, B=${slotB})`);
+          }
+      };
+
       cooldownSlider.oninput = () => cooldownVal.textContent = cooldownSlider.value;
 
       async function loadSound(url) {
@@ -204,53 +233,178 @@
       }
 
       function setRPM() {
-          setTargetRPM(parseInt(rpmSlider.value), 5);
+          const v = Number(rpmSlider.value);
+          console.log(`\n[setRPM] pressed. slider=${v} A=${slotA} B=${slotB} sliderSlot=${sliderSlot}`);
+
+          if (Number.isNaN(v)) {
+              console.warn('[setRPM] slider is NaN; abort.');
+              return;
+          }
+
+          // First press: define A and ramp to it; leave slider showing A
+          if (slotA === null) {
+              slotA = v;
+              sliderSlot = 'A';
+              console.log(`[setRPM] define A=${slotA}; sliderSlot=${sliderSlot}`);
+              setTargetRPM(slotA, 5, () => console.log('[setRPM] ramp to A done'));
+              return;
+          }
+
+          // Second press with a different value → define B and ramp to B
+          if (slotB === null && v !== slotA) {
+              slotB = v;
+              console.log(`[setRPM] define B=${slotB} (A=${slotA})`);
+              setTargetRPM(slotB, 5, () => console.log('[setRPM] first ramp to B done'));
+
+              // After pressing, show A for the next press and make slider represent A
+              sliderSlot = 'A';
+              rpmSlider.value = String(slotA);
+              rpmVal.textContent = slotA;
+              console.log(`[setRPM] slider resets to A=${slotA}; sliderSlot=${sliderSlot}`);
+              console.log(`[state] A=${slotA} B=${slotB} sliderSlot=${sliderSlot}`);
+              return;
+          }
+
+          // Both A & B exist → flip to whichever slot slider currently represents,
+          // then swap slider to the other slot for next time.
+          if (slotA !== null && slotB !== null) {
+              const target = (sliderSlot === 'A') ? slotA : slotB;
+              console.log(`[setRPM] flip target=${target} (from slot ${sliderSlot})`);
+              setTargetRPM(target, 5, () => console.log(`[setRPM] flip ramp to ${target} done`));
+
+              sliderSlot = (sliderSlot === 'A') ? 'B' : 'A';
+              const nextShown = (sliderSlot === 'A') ? slotA : slotB;
+              rpmSlider.value = String(nextShown);
+              rpmVal.textContent = nextShown;
+              console.log(`[setRPM] now sliderSlot=${sliderSlot}, slider shows ${nextShown}`);
+              console.log(`[state] A=${slotA} B=${slotB} sliderSlot=${sliderSlot}`);
+          }
       }
 
       function standUp() {
-          const temp = currentRPM;
+          const before = currentRPM;
+
+          // Go to 60 over 5s
           setTargetRPM(60, 5, () => {
-              setTimeout(() => setTargetRPM(temp, 5), 10000);
+              // Hold 10s
+              setTimeout(() => {
+                  if (cooldownActive) {
+                      const now = performance.now();
+                      const resumeTarget = cooldownTargetAt(now);
+
+                      // Return to where cooldown *should be* now over 5s
+                      setTargetRPM(resumeTarget, 5, () => {
+                          // If still in phase 2 (80->70 ramp), continue the ramp for the remaining time
+                          const phase2End = cooldownStartMs + (cooldownDurationMs * 0.9);
+                          const remainingMs = Math.max(0, phase2End - performance.now());
+                          if (remainingMs > 0) {
+                              setTargetRPM(70, remainingMs / 1000);
+                          }
+                          // If we're already in the last 10%, we're at 70 and just hold.
+                      });
+                  } else {
+                      // No cooldown—return to the previous (pre-stand) setting over 5s
+                      setTargetRPM(before, 5);
+                  }
+              }, 10000);
           });
       }
 
       function startCooldown() {
-          const durationMinutes = parseInt(cooldownSlider.value);
-          const totalSeconds = durationMinutes * 60 - 5;
-          const rampDownSeconds = Math.floor(totalSeconds * 0.9);
-          let secondsLeft = totalSeconds + 5;
+          const minutes = parseInt(cooldownSlider.value, 10);
+          cooldownDurationMs = minutes * 60 * 1000;
+          cooldownStartMs = performance.now();
+          cooldownStartRPM = currentRPM;
+          cooldownActive = true;
 
+          // Countdown UI
           if (countdownInterval) clearInterval(countdownInterval);
-          updateCountdown(secondsLeft);
           countdownInterval = setInterval(() => {
-              updateCountdown(--secondsLeft);
-              if (secondsLeft <= 0) clearInterval(countdownInterval);
-          }, 1000);
+              const elapsed = performance.now() - cooldownStartMs;
+              const remaining = Math.max(0, cooldownDurationMs - elapsed);
+              const min = Math.floor(remaining / 60000);
+              const sec = Math.floor((remaining % 60000) / 1000);
+              countdownDisplay.textContent = `Cooldown Time Left: ${min}:${sec.toString().padStart(2,'0')}`;
+              if (remaining <= 0) clearInterval(countdownInterval);
+          }, 250);
 
+          // Key timestamps
+          const endAt    = cooldownStartMs + cooldownDurationMs;      // 100%
+          const phase2End = cooldownStartMs + cooldownDurationMs * 0.9; // 90% (last 10% hold at 70)
+
+          // Phase 1: ramp to 80 over 5s
           setTargetRPM(80, 5, () => {
-              let count = 0;
-              clearInterval(cooldownTimer);
-              cooldownTimer = setInterval(() => {
-                  count++;
-                  if (count <= rampDownSeconds) {
-                      const newRPM = 80 - (10 * count / rampDownSeconds);
-                      updateRPM(newRPM);
+              // Phase 2: linearly to 70 until 90% mark; last 10% hold at 70
+              const now = performance.now();
+              const remainingMsToPhase2End = Math.max(0, phase2End - now);
+
+              if (remainingMsToPhase2End > 0) {
+                  // Ramp 80 -> 70 until 90% point
+                  setTargetRPM(70, remainingMsToPhase2End / 1000, () => {
+                      // Last 10%: hold 70 until the very end, then chime + stop
+                      const lastHoldMs = Math.max(0, endAt - performance.now());
+                      if (lastHoldMs > 0) {
+                          setTimeout(finishCooldown, lastHoldMs);
+                      } else {
+                          finishCooldown();
+                      }
+                  });
+              } else {
+                  // Already inside the last 10% window—snap to 70 and wait for end
+                  setTargetRPM(70, 0);
+                  const remainingToEnd = Math.max(0, endAt - performance.now());
+                  if (remainingToEnd > 0) {
+                      setTimeout(finishCooldown, remainingToEnd);
                   } else {
-                      updateRPM(70);
+                      finishCooldown();
                   }
-                  if (count >= totalSeconds) {
-                      clearInterval(cooldownTimer);
-                      cadenceLoopActive = false;
-                      releaseWakeLock();
-                      playBuffer(chimeBuffer);
-                      releaseWakeLock();
-                      document.getElementById("startButton").innerHTML = '<i class="bi bi-play-fill me-2"></i>Start';
-                      document.getElementById("setRPMButton").disabled = true;
-                      document.getElementById("standUpButton").disabled = true;
-                      document.getElementById("cooldownButton").disabled = true;
-                  }
-              }, 1000);
+              }
           });
+      }
+
+      function cooldownTargetAt(nowMs) {
+          if (!cooldownActive) return currentRPM;
+          const elapsed = nowMs - cooldownStartMs;
+          const phase1 = 5000; // first 5s to 80
+          const phase2End = cooldownStartMs + (cooldownDurationMs * 0.9);
+
+          if (elapsed <= 0) return cooldownStartRPM;
+
+          if (elapsed < phase1) {
+              const t = elapsed / phase1;
+              return cooldownStartRPM + (80 - cooldownStartRPM) * t;
+          }
+
+          if (nowMs < phase2End) {
+              const t = (nowMs - (cooldownStartMs + phase1)) / (phase2End - (cooldownStartMs + phase1));
+              return 80 + (70 - 80) * Math.max(0, Math.min(1, t));
+          }
+
+          return 70; // last 10% hold
+      }
+
+      function finishCooldown() {
+          cooldownActive = false;
+          cadenceLoopActive = false;
+          // stop any interval/timers if you keep references
+          if (countdownInterval) clearInterval(countdownInterval);
+          countdownDisplay.textContent = '';
+
+          // Stop the silent loop if it's running
+          try { if (silentSource) silentSource.stop(); } catch (e) {}
+
+          // Play the end chime exactly once
+          playBuffer(chimeBuffer);
+
+          // If you use Wake Lock:
+          if (typeof releaseWakeLock === 'function') releaseWakeLock();
+
+          // Reset UI/buttons
+          const startBtn = document.getElementById("startButton");
+          startBtn.innerHTML = '<i class="bi bi-play-fill me-2"></i>Start';
+          document.getElementById("setRPMButton").disabled = true;
+          document.getElementById("standUpButton").disabled = true;
+          document.getElementById("cooldownButton").disabled = true;
       }
 
       function updateCountdown(secondsLeft) {
@@ -293,8 +447,25 @@
 
       async function cadenceLoop() {
           while (cadenceLoopActive) {
+              // If cooldown is active and time is up, stop without playing another tick
+              if (cooldownActive) {
+                  const now = performance.now();
+                  const endAt = cooldownStartMs + cooldownDurationMs;
+                  if (now >= endAt) {
+                      // Make sure we finish cleanly (plays chime, clears UI, etc.)
+                      finishCooldown();
+                      break;
+                  }
+              }
+
+              // Safety: bail if we've been turned off elsewhere
+              if (!cadenceLoopActive) break;
+
+              // Play next beat
               playBuffer(cadenceBeat === 0 ? tickBuffer : tockBuffer);
               cadenceBeat = (cadenceBeat + 1) % 4;
+
+              // Wait until next half-revolution (2 sounds per revolution)
               const delay = 60000 / (currentRPM * 2);
               await new Promise(resolve => setTimeout(resolve, delay));
           }
@@ -322,8 +493,23 @@
           document.getElementById("rpmSlider").disabled = true;
           document.getElementById("cooldownSlider").disabled = true;
       });
-
-      navigator.serviceWorker.register('/cadence/service-worker.js');
       </script>
+    <script>
+      if ('serviceWorker' in navigator) {
+          window.addEventListener('load', async () => {
+              try {
+                  const reg = await navigator.serviceWorker.register(
+                      '/cadence/service-worker.js?v=v3',  // bump with SW_VERSION
+                      { scope: '/cadence/', updateViaCache: 'none' }
+                  );
+                  reg.update?.(); // ask for updates on load
+                  // Optional: force new SW to take control immediately
+                  if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
+              } catch (e) {
+                  console.log('SW registration failed', e);
+              }
+          });
+      }
+    </script>
   </body>
 </html>
