@@ -217,10 +217,12 @@
               startSilentLoop();
               button.innerHTML = '<i class="bi bi-stop-fill me-2"></i>Stop';
               others.forEach(b => b.disabled = false);
-              setTargetRPM(85, 0);
+              // Resume at last RPM, no forced default
+              // setTargetRPM(85, 0);
               cadenceLoop();
           } else {
               cadenceLoopActive = false;
+              cooldownActive = false;
               releaseWakeLock();
               if (silentSource) silentSource.stop();
               countdownDisplay.textContent = '';
@@ -432,8 +434,8 @@
       }
 
       function updateRPM(rpm) {
-          currentRPM = Math.round(rpm);
-          currentRPMDisplay.textContent = `${currentRPM} RPM`;
+          currentRPM = Number(rpm.toFixed(1));
+          currentRPMDisplay.textContent = `${currentRPM.toFixed(1)} RPM`;
       }
 
       function startSilentLoop() {
